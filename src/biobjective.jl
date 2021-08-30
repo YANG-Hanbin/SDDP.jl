@@ -58,6 +58,7 @@ function set_trade_off_weight(model::SDDP.PolicyGraph, weight::Float64)
     @assert 0 <= weight <= 1
     for (_, node) in model.nodes
         node.objective_state.initial_value = (weight,)
+        node.objective_state.state = (weight,)
     end
     return
 end
