@@ -3,12 +3,12 @@
 #  License, v. 2.0. If a copy of the MPL was not distributed with this
 #  file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-using SDDP
-using Gurobi
-using Plots
-using BiObjectiveSDDP
+include(joinpath(@__DIR__, "BiObjectiveSDDP.jl"))
+using .BiObjectiveSDDP
 
-BiObjectiveSDDP.include_gurobi_specific_functions()
+using SDDP
+import Gurobi
+import Plots
 
 const OBJ_1_SCALING = 0.01
 const OBJ_2_SCALING = 0.1
@@ -26,10 +26,8 @@ function create_model()
         @variables(
             sp,
             begin
-                # State variables.
                 0 <= storedEnergy[i = 1:4] <= storedEnergy_ub[i],
                 (SDDP.State, initial_value = storedEnergy_initial[i])
-                # Control variables.
                 0 <= spillEnergy[i = 1:4]
                 0 <= hydroGeneration[i = 1:4] <= hydro_ub[i]
                 thermal_lb[i][j] <=
@@ -39,14 +37,12 @@ function create_model()
                 0 <=
                 deficit[i = 1:4, j = 1:4] <=
                 demand[month][i] * deficit_ub[j]
-                # Dummy variables for helpers.
                 inflow[i = 1:4]
             end
         )
         @constraints(
             sp,
             begin
-                # Model constraints.
                 [i = 1:4],
                 sum(deficit[i, :]) +
                 hydroGeneration[i] +
@@ -84,7 +80,8 @@ function create_model()
         SDDP.initialize_biobjective_subproblem(sp)
         SDDP.parameterize(sp, Ω) do ω
             JuMP.fix.(inflow, ω)
-            return SDDP.set_biobjective_functions(sp, objective_1, objective_2)
+            SDDP.set_biobjective_functions(sp, objective_1, objective_2)
+            return
         end
     end
     return model
@@ -110,60 +107,43 @@ function extract_objectives(simulation)
 end
 
 function plot_objective_space(simulations, simulation_weights)
-    plot(title = "Objective Space")
+    Plots.plot(title = "Objective Space")
     for λ in simulation_weights
-        scatter!(
+        Plots.scatter!(
             extract_objectives(simulations[λ])...,
             label = "\\lambda = $(λ)",
             alpha = 0.4,
         )
     end
-    p = plot!(xlabel = "Deficit cost", ylabel = "Thermal cost")
-    savefig("objective_space.pdf")
+    p = Plots.plot!(xlabel = "Deficit cost", ylabel = "Thermal cost")
+    Plots.savefig("objective_space.pdf")
     return p
 end
 
 function plot_weight_space(weights, bounds, simulations)
-    plot(weights, bounds, label = "")
+    Plots.plot(weights, bounds, label = "")
     for (λ, sim) in simulations
         obj_1, obj_2 = extract_objectives(simulations[λ])
         weighted_sum = λ .* obj_1 .+ (1 - λ) .* obj_2
-        scatter!(
+        Plots.scatter!(
             fill(λ, length(weighted_sum)),
             weighted_sum,
             alpha = 0.4,
             label = "",
         )
     end
-    p = plot!(xlabel = "Weight \\lambda", ylabel = "Weighted-sum")
-    savefig("weight_space.pdf")
+    p = Plots.plot!(xlabel = "Weight \\lambda", ylabel = "Weighted-sum")
+    Plots.savefig("weight_space.pdf")
     return p
 end
 
-# function plot_publication(simulations, simulation_weights)
-#     plts = [
-#         SDDP.publication_plot(simulations[λ]; title = "λ = $(λ)") do data
-#             return sum(data[:storedEnergy][i].out for i in 1:4)
-#         end
-#         for λ in simulation_weights
-#     ]
-#     plot(plts...,
-#         xlabel = "Stage",
-#         layout = (1, length(keys)),
-#         margin = 5Plots.mm,
-#         size = (1000, 300),
-#         ylim = (0, 2.5e5),
-#         ylabel = "Stored energy"
-#     )
-# end
-
-import Logging
-Logging.global_logger(Logging.ConsoleLogger(stdout, Logging.Debug))
+# import Logging
+# Logging.global_logger(Logging.ConsoleLogger(stdout, Logging.Debug))
 
 model = create_model()
 lower_bound, weights, bounds = BiObjectiveSDDP.bi_objective_sddp(
     model,
-    with_optimizer(Gurobi.Optimizer, GUROBI_ENV, OutputFlag = 0);
+    () -> Gurobi.Optimizer(GUROBI_ENV);
     # BiObjectiveSDDP kwargs ...
     bi_objective_minor_iteration_limit = 60,
     bi_objective_lambda_atol = 1e-3,

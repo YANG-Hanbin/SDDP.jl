@@ -6,10 +6,7 @@
 module BiObjectiveSDDP
 
 # Include the Gurobi-specific versions of get_BinvA and get_basis.
-function include_gurobi_specific_functions()
-    include(joinpath(@__DIR__, "gurobi.jl"))
-    return
-end
+include(joinpath(@__DIR__, "gurobi.jl"))
 
 import Printf
 import SDDP
@@ -395,6 +392,7 @@ function get_next_lambda(
     # Quickly optimize `dest` to obtain a basis. Note: for sanity sake, the
     # ObjectiveValue of `dest` after this should be identical to the objective
     # value of node.subproblem (modulo numerical tolerances).
+    MOI.set(dest, MOI.Silent(), true)
     MOI.optimize!(dest)
     # Get the next lambda using MOI calls defined above.
     return get_next_lambda(
@@ -467,7 +465,7 @@ function print_iteration_header(io)
     )
     println(
         io,
-        "          BI-OBJECTIVE SDDP.jl (c) Oscar Dowson, 2019-19          ",
+        "          BI-OBJECTIVE SDDP.jl (c) Oscar Dowson, 2019-21          ",
     )
     println(io)
     println(io, "      Iterations")
@@ -602,7 +600,12 @@ function bi_objective_sddp(
                 major_iterations += 1
             end
             SDDP.set_trade_off_weight(model, λ)
-            SDDP.train(model; run_numerical_stability_report = false, kwargs...)
+            SDDP.train(
+                model;
+                run_numerical_stability_report = false,
+                add_to_existing_cuts = true,
+                kwargs...,
+            )
             minor_iterations += 1
             sddp_iterations += length(model.most_recent_training_results.log)
             if bi_objective_post_train_callback !== nothing

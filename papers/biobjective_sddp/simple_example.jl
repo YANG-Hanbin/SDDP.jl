@@ -3,12 +3,12 @@
 #  License, v. 2.0. If a copy of the MPL was not distributed with this
 #  file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-using SDDP
-using Gurobi
-using BiObjectiveSDDP
-using Random
+include(joinpath(@__DIR__, "BiObjectiveSDDP.jl"))
+using .BiObjectiveSDDP
 
-BiObjectiveSDDP.include_gurobi_specific_functions()
+using SDDP
+import Gurobi
+import Random
 
 const GUROBI_ENV = Gurobi.Env()
 
@@ -16,12 +16,9 @@ function create_model()
     model = SDDP.LinearPolicyGraph(
         stages = 2,
         lower_bound = 0.0,
-        optimizer = with_optimizer(
-            Gurobi.Optimizer,
-            GUROBI_ENV,
-            OutputFlag = 0,
-        ),
+        optimizer = () -> Gurobi.Optimizer(GUROBI_ENV),
     ) do sp, t
+        set_silent(sp)
         @variable(sp, x >= 0, SDDP.State, initial_value = 0.0)
         if t == 1
             @expression(sp, objective_1, 2 * x.out)
@@ -36,25 +33,13 @@ function create_model()
             @expression(sp, objective_1, y)
             @expression(sp, objective_2, 3 * y)
         end
-        SDDP.add_objective_state(
-            sp,
-            initial_value = 1.0,
-            lower_bound = 0.0,
-            upper_bound = 1.0,
-            lipschitz = 10.0,
-        ) do y, ω
-            return y
-        end
+        SDDP.initialize_biobjective_subproblem(sp)
         SDDP.parameterize(sp, [nothing]) do ω
-            λ = SDDP.objective_state(sp)
-            @stageobjective(sp, λ * objective_1 + (1 - λ) * objective_2)
+            SDDP.set_biobjective_functions(sp, objective_1, objective_2)
         end
     end
     return model
 end
-
-import Logging
-Logging.global_logger(Logging.ConsoleLogger(stdout, Logging.Debug))
 
 Random.seed!(1)
 
@@ -63,7 +48,7 @@ bounds_for_reporting = Tuple{Float64,Float64,Float64}[]
 model = create_model()
 lower_bound, weights, bounds = BiObjectiveSDDP.bi_objective_sddp(
     model,
-    with_optimizer(Gurobi.Optimizer, GUROBI_ENV, OutputFlag = 0);
+    () -> Gurobi.Optimizer(GUROBI_ENV);
     # BiObjectiveSDDP kwargs ...
     bi_objective_sddp_iteration_limit = 20,
     bi_objective_lower_bound = 0.0,
@@ -74,14 +59,14 @@ lower_bound, weights, bounds = BiObjectiveSDDP.bi_objective_sddp(
         begin
             upper_bound = BiObjectiveSDDP.surrogate_upper_bound(
                 model,
-                with_optimizer(Gurobi.Optimizer, GUROBI_ENV, OutputFlag = 0);
+                () -> Gurobi.Optimizer(GUROBI_ENV);
                 global_lower_bound = 0.0,
                 lambda_minimum_step = 1e-4,
                 lambda_atol = 1e-4,
             )
             lower_bound, _, _ = BiObjectiveSDDP.surrogate_lower_bound(
                 model,
-                with_optimizer(Gurobi.Optimizer, GUROBI_ENV, OutputFlag = 0);
+                () -> Gurobi.Optimizer(GUROBI_ENV);
                 global_lower_bound = 0.0,
                 lambda_minimum_step = 1e-4,
                 lambda_atol = 1e-4,

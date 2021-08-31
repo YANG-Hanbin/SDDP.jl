@@ -8,7 +8,6 @@
 #
 # See `BiObjectiveSDDP.get_BinvA` and `BiObjectiveSDDP.get_basis`.
 
-import BiObjectiveSDDP
 import Gurobi
 import SparseArrays
 
@@ -16,9 +15,9 @@ import SparseArrays
 ####    New functions for the Gurobi C API.
 ####
 
-function BiObjectiveSDDP.get_basis(model::Gurobi.Optimizer)
+function get_basis(model::Gurobi.Optimizer)
     p = Ref{Cint}()
-    @assert GRBgetintattr(model, "NumConstrs", p) == 0
+    @assert Gurobi.GRBgetintattr(model, "NumConstrs", p) == 0
     bhead = zeros(Cint, p[])
     ret = Gurobi.GRBgetBasisHead(model, bhead)
     @assert ret == 0
@@ -26,18 +25,24 @@ function BiObjectiveSDDP.get_basis(model::Gurobi.Optimizer)
     return bhead
 end
 
-function BiObjectiveSDDP.get_BinvA(model::Gurobi.Optimizer)
+mutable struct GRBsvec
+    len::Cint
+    ind::Ptr{Cint}
+    val::Ptr{Cdouble}
+end
+
+function get_BinvA(model::Gurobi.Optimizer)
     p = Ref{Cint}()
-    @assert GRBgetintattr(model, "NumConstrs", p) == 0
+    @assert Gurobi.GRBgetintattr(model, "NumConstrs", p) == 0
     ncon = p[]
-    @assert GRBgetintattr(model, "NumVars", p) == 0
+    @assert Gurobi.GRBgetintattr(model, "NumVars", p) == 0
     nvar = p[]
     function _GRBBinvRowi(model::Gurobi.Optimizer, i::Int)
         ind = zeros(Cint, ncon + nvar)
         val = zeros(Cdouble, ncon + nvar)
-        x = Gurobi.GRBsvec(0, pointer(ind), pointer(val))
-        GC.@preserve ind val begin
-            @assert Gurobi.GRBBinvRowi(model, i, x) == 0
+        x = GRBsvec(0, pointer(ind), pointer(val))
+        GC.@preserve ind val x begin
+            @assert Gurobi.GRBBinvRowi(model, i, pointer_from_objref(x)) == 0
         end
         return ind[1:x.len], val[1:x.len]
     end
